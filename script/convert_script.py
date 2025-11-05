@@ -120,14 +120,15 @@ def convert_bph_pca_nii_to_nnunet(base_path="data/BPH-PCA",
             if (idx + 1) % 10 == 0:
                 logger.info(f"已处理 {disease_type} 病例: {idx + 1}/{len(cases)}")
     
-    # 创建dataset.json
+    # 创建dataset.json，符合nnUNet v2格式要求
     dataset_info = {
         "name": "ProstateMultiModal_BPH_PCA",
         "description": "Prostate segmentation with BPH and PCA cases",
         "reference": "Your Institution",
         "licence": "CC-BY-NC-SA 4.0",
         "release": "1.0",
-        "modality": {
+        # 修改：使用channel_names替代modality以符合nnUNet v2格式要求
+        "channel_names": {
             "0": "ADC",
             "1": "DWI",  # 修正：与字典中保持一致
             "2": "T2_fs", 
@@ -140,6 +141,8 @@ def convert_bph_pca_nii_to_nnunet(base_path="data/BPH-PCA",
         },
         "numTraining": case_count,
         "numTest": 0,
+        # 添加：指定文件扩展名以符合nnUNet v2格式要求
+        "file_ending": ".nii.gz",
         "training": training_data,
         "test": []
     }
