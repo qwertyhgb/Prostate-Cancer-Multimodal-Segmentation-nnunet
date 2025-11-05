@@ -93,7 +93,7 @@ def create_grouped_datasets_corrected(original_dataset_dir, output_base_dir):
     print(f"   异常病例数 (其他模态数): {len(case_analysis) - len(complete_cases) - len(missing_cases)}")
     
     # 创建完整模态数据集 (Group A)
-    group_a_dir = os.path.join(output_base_dir, 'Dataset001_ProstateBPHPCA_GroupA')
+    group_a_dir = os.path.join(output_base_dir, 'Dataset999_ProstateBPHPCA_GroupA')
     create_group_dataset_corrected(group_a_dir, original_dataset, complete_cases, "完整模态组")
     
     # 创建缺失模态数据集 (Group B)
@@ -106,7 +106,7 @@ def create_grouped_datasets_corrected(original_dataset_dir, output_base_dir):
         'group_a': {
             'name': '完整模态组',
             'dataset_id': 1,
-            'dataset_name': 'Dataset001_ProstateBPHPCA_GroupA',
+            'dataset_name': 'Dataset999_ProstateBPHPCA_GroupA',
             'cases_count': len(complete_cases),
             'modalities': ['ADC', 'DWI', 'T2_fs', 'T2_not_fs', 'gaoqing_T2']
         },
@@ -166,10 +166,10 @@ def create_group_dataset_corrected(dataset_dir, original_dataset, cases_with_fil
     
     # 复制图像和标签文件
     original_images_dir = os.path.join(os.path.dirname(dataset_dir), 
-                                      'Dataset001_ProstateBPHPCA',
+                                      'Dataset999_ProstateBPHPCA',
                                       'imagesTr')
     original_labels_dir = os.path.join(os.path.dirname(dataset_dir),
-                                      'Dataset001_ProstateBPHPCA',
+                                      'Dataset999_ProstateBPHPCA',
                                       'labelsTr')
     
     copied_cases = []
