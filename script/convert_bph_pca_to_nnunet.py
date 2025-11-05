@@ -5,7 +5,7 @@ import nibabel as nib
 import numpy as np
 from pathlib import Path
 
-def convert_bph_pca_to_nnunet_v2_flexible(data_root_dir, output_dir, task_name="Task999_ProstateMultiModal"):
+def convert_bph_pca_to_nnunet_v2_flexible(data_root_dir, output_dir, task_name="Dataset001_ProstateBPHPCA"):
     """
     将BPH-PCA多模态前列腺MRI数据转换为nnU-Net v2格式（灵活模式）
     即使某些模态缺失，也会转换所有可用的病例
@@ -253,8 +253,8 @@ if __name__ == "__main__":
     parser.add_argument('--data_root', default='data', help='原始数据根目录 (默认: data)')
     parser.add_argument('--output_dir', default='nnUNet_raw_data_base/nnUNet_raw_data', 
                        help='输出目录 (默认: nnUNet_raw_data_base/nnUNet_raw_data)')
-    parser.add_argument('--task_name', default='Task999_ProstateMultiModal', 
-                       help='nnU-Net任务名称 (默认: Task999_ProstateMultiModal)')
+    parser.add_argument('--task_name', default='Dataset001_ProstateBPHPCA', 
+                       help='nnU-Net任务名称 (默认: Dataset001_ProstateBPHPCA)')
     
     args = parser.parse_args()
     
@@ -271,4 +271,4 @@ if __name__ == "__main__":
     
     print(f"\n下一步:")
     print(f"1. 设置环境变量: export nnUNet_raw='{output_dir}'")
-    print(f"2. 运行nnUNet规划: nnUNetv2_plan_and_preprocess -d 999 --verify_dataset_integrity")
+    print(f"2. 运行nnUNet规划: nnUNetv2_plan_and_preprocess -d 1 --verify_dataset_integrity")
