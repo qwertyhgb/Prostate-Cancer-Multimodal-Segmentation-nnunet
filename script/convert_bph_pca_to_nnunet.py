@@ -114,7 +114,7 @@ class BPHPCAToNnUNetConverter:
     def _resample_image(self, image_data: np.ndarray, target_shape: tuple, 
                        case_id: str, modality: str) -> np.ndarray:
         """
-        重采样图像到目标形状
+        鲁棒的图像重采样函数
         
         Args:
             image_data: 原始图像数据
@@ -123,30 +123,155 @@ class BPHPCAToNnUNetConverter:
             modality: 模态名称
             
         Returns:
-            重采样后的图像数据
+            重采样后的图像数据，失败时返回None
         """
         if image_data.shape == target_shape:
             return image_data
         
-        # 计算缩放因子
-        zoom_factors = [target_shape[i] / image_data.shape[i] for i in range(len(target_shape))]
-        
         print(f"   🔄 重采样 {case_id} 的 {modality}: {image_data.shape} -> {target_shape}")
         
-        # 使用三次样条插值进行重采样
         try:
-            resampled_data = zoom(image_data, zoom_factors, order=1, mode='nearest')
+            # 处理异常维度的图像数据
+            if len(image_data.shape) != len(target_shape):
+                print(f"   ⚠️  维度不匹配: {len(image_data.shape)} vs {len(target_shape)}")
+                
+                # 尝试降维处理
+                if len(image_data.shape) > len(target_shape):
+                    # 如果是高维数据，尝试取第一个切片或压缩多余维度
+                    if len(image_data.shape) == 5 and len(target_shape) == 3:
+                        # 5D -> 3D: 取第一个时间点和第一个通道
+                        if image_data.shape[3] == 1 and image_data.shape[4] == 1:
+                            image_data = image_data[:, :, :, 0, 0]
+                            print(f"   ✅ 5D->3D降维成功: {image_data.shape}")
+                        elif image_data.shape[3] == 1:
+                            # 压缩第4维，然后处理第5维
+                            image_data = image_data[:, :, :, 0, :]
+                            if image_data.shape[3] == 1:
+                                image_data = np.squeeze(image_data)
+                            else:
+                                # 取第一个切片
+                                image_data = image_data[:, :, :, 0]
+                            print(f"   ✅ 5D->3D降维成功: {image_data.shape}")
+                        else:
+                            # 取第一个切片
+                            image_data = image_data[:, :, :, 0, 0]
+                            print(f"   ✅ 5D->3D降维（取第一切片）: {image_data.shape}")
+                    elif len(image_data.shape) == 4 and len(target_shape) == 3:
+                        # 4D -> 3D: 压缩或取第一个切片
+                        if image_data.shape[3] == 1:
+                            image_data = np.squeeze(image_data)
+                            print(f"   ✅ 4D->3D降维成功: {image_data.shape}")
+                        else:
+                            image_data = image_data[:, :, :, 0]
+                            print(f"   ✅ 4D->3D降维（取第一切片）: {image_data.shape}")
+                    else:
+                        print(f"   ❌ 无法处理的维度转换: {len(image_data.shape)} -> {len(target_shape)}")
+                        return None
+                else:
+                    print(f"   ❌ 无法处理的维度转换: {len(image_data.shape)} -> {len(target_shape)}")
+                    return None
+                
+                # 重新检查维度
+                if len(image_data.shape) != len(target_shape):
+                    print(f"   ❌ 降维后仍不匹配: {len(image_data.shape)} vs {len(target_shape)}")
+                    return None
             
-            # 确保输出形状正确（由于浮点数精度问题可能有微小差异）
-            if resampled_data.shape != target_shape:
-                # 如果形状仍不匹配，使用裁剪或填充
-                resampled_data = self._adjust_shape(resampled_data, target_shape)
+            # 检查是否有0维度
+            for i, dim in enumerate(image_data.shape):
+                if dim <= 0:
+                    print(f"   ❌ 原始图像第{i}维无效: {dim}")
+                    return None
             
-            return resampled_data.astype(np.float32)
+            for i, dim in enumerate(target_shape):
+                if dim <= 0:
+                    print(f"   ❌ 目标形状第{i}维无效: {dim}")
+                    return None
+            
+            # 方法1: 使用scipy.ndimage.zoom
+            try:
+                zoom_factors = [target_shape[i] / image_data.shape[i] for i in range(len(target_shape))]
+                resampled_data = zoom(image_data, zoom_factors, order=1, mode='nearest')
+                
+                # 微调形状（处理浮点精度问题）
+                if resampled_data.shape != target_shape:
+                    resampled_data = self._adjust_shape(resampled_data, target_shape)
+                
+                print(f"   ✅ zoom重采样成功: {resampled_data.shape}")
+                return resampled_data.astype(np.float32)
+                
+            except Exception as zoom_error:
+                print(f"   ⚠️  zoom重采样失败: {zoom_error}")
+            
+            # 方法2: 简单的最近邻重采样
+            try:
+                resampled_data = np.zeros(target_shape, dtype=np.float32)
+                
+                # 计算索引映射
+                for i in range(target_shape[0]):
+                    src_i = int(i * image_data.shape[0] / target_shape[0])
+                    src_i = min(src_i, image_data.shape[0] - 1)
+                    
+                    for j in range(target_shape[1]):
+                        src_j = int(j * image_data.shape[1] / target_shape[1])
+                        src_j = min(src_j, image_data.shape[1] - 1)
+                        
+                        if len(target_shape) == 3:
+                            for k in range(target_shape[2]):
+                                src_k = int(k * image_data.shape[2] / target_shape[2])
+                                src_k = min(src_k, image_data.shape[2] - 1)
+                                resampled_data[i, j, k] = image_data[src_i, src_j, src_k]
+                        else:
+                            resampled_data[i, j] = image_data[src_i, src_j]
+                
+                print(f"   ✅ 手动重采样成功: {resampled_data.shape}")
+                return resampled_data
+                
+            except Exception as manual_error:
+                print(f"   ❌ 手动重采样失败: {manual_error}")
+            
+            return None
             
         except Exception as e:
-            print(f"   ❌ 重采样失败 {case_id} 的 {modality}: {e}")
+            print(f"   ❌ 重采样完全失败 {case_id} 的 {modality}: {e}")
             return None
+    
+    def _adjust_shape(self, data: np.ndarray, target_shape: tuple) -> np.ndarray:
+        """
+        调整数据形状到目标形状（通过裁剪或填充）
+        
+        Args:
+            data: 输入数据
+            target_shape: 目标形状
+            
+        Returns:
+            调整后的数据
+        """
+        current_shape = data.shape
+        adjusted_data = data.copy()
+        
+        for i in range(len(target_shape)):
+            current_size = current_shape[i]
+            target_size = target_shape[i]
+            
+            if current_size > target_size:
+                # 需要裁剪
+                start = (current_size - target_size) // 2
+                end = start + target_size
+                slices = [slice(None)] * len(current_shape)
+                slices[i] = slice(start, end)
+                adjusted_data = adjusted_data[tuple(slices)]
+            elif current_size < target_size:
+                # 需要填充
+                pad_width = [(0, 0)] * len(current_shape)
+                pad_total = target_size - current_size
+                pad_before = pad_total // 2
+                pad_after = pad_total - pad_before
+                pad_width[i] = (pad_before, pad_after)
+                adjusted_data = np.pad(adjusted_data, pad_width, mode='constant', constant_values=0)
+            
+            current_shape = adjusted_data.shape
+        
+        return adjusted_data
     
     def _adjust_shape(self, data: np.ndarray, target_shape: tuple) -> np.ndarray:
         """
@@ -271,6 +396,11 @@ class BPHPCAToNnUNetConverter:
             if missing_modalities:
                 print(f"⚠️  跳过 {case_id}: 缺少模态 {missing_modalities}")
                 return False, {}
+        elif self.zero_fill_missing:
+            # 0填充模式：只要有标签文件就接受，所有缺失模态都会被0填充
+            if not modalities:
+                print(f"   ℹ️  {case_id}: 所有模态缺失，将使用0填充")
+            return True, modalities
         else:
             # 其他模式：至少需要4个核心模态
             core_modalities = {'ADC', 'DWI', 'T2 fs', 'T2 not fs'}
@@ -305,11 +435,46 @@ class BPHPCAToNnUNetConverter:
                 break
         
         if not reference_modality:
-            raise ValueError(f"没有找到参考模态")
-        
-        ref_img = nib.load(modalities[reference_modality])
-        ref_shape = ref_img.shape
-        ref_affine = ref_img.affine
+            if self.zero_fill_missing:
+                # 如果没有参考模态但在0填充模式，使用默认形状
+                print(f"   ⚠️  没有参考模态，使用默认形状: {case_id}")
+                ref_shape = (256, 256, 20)  # 默认形状
+                ref_affine = np.eye(4)  # 默认仿射矩阵
+            else:
+                raise ValueError(f"没有找到参考模态")
+        else:
+            ref_img = nib.load(modalities[reference_modality])
+            ref_data = ref_img.get_fdata().astype(np.float32)
+            ref_affine = ref_img.affine
+            
+            # 确保参考形状是3维的
+            if len(ref_data.shape) == 3:
+                ref_shape = ref_data.shape
+            elif len(ref_data.shape) > 3:
+                # 处理高维参考数据
+                print(f"   ⚠️  参考模态 {reference_modality} 有异常维度: {ref_data.shape}")
+                if len(ref_data.shape) == 5:
+                    if ref_data.shape[3] == 1 and ref_data.shape[4] == 1:
+                        ref_data = ref_data[:, :, :, 0, 0]
+                    elif ref_data.shape[3] == 1:
+                        ref_data = ref_data[:, :, :, 0, :]
+                        if ref_data.shape[3] == 1:
+                            ref_data = np.squeeze(ref_data)
+                        else:
+                            ref_data = ref_data[:, :, :, 0]
+                    else:
+                        ref_data = ref_data[:, :, :, 0, 0]
+                elif len(ref_data.shape) == 4:
+                    if ref_data.shape[3] == 1:
+                        ref_data = np.squeeze(ref_data)
+                    else:
+                        ref_data = ref_data[:, :, :, 0]
+                
+                ref_shape = ref_data.shape
+                print(f"   ✅ 参考形状标准化为: {ref_shape}")
+            else:
+                print(f"   ❌ 参考模态维度过低: {ref_data.shape}")
+                ref_shape = (256, 256, 20)  # 使用默认形状
         
         # 创建多通道数据
         combined_data = np.zeros((*ref_shape, num_channels), dtype=np.float32)
@@ -326,26 +491,18 @@ class BPHPCAToNnUNetConverter:
                     
                     # 检查形状是否一致
                     if data.shape != ref_shape:
-                        if self.enable_resampling:
-                            # 尝试重采样
-                            resampled_data = self._resample_image(data, ref_shape, case_id, modality)
-                            if resampled_data is not None:
-                                data = resampled_data
-                            else:
-                                if self.zero_fill_missing:
-                                    print(f"   🔄 重采样失败，使用0填充: {case_id} 的 {modality}")
-                                    data = np.zeros(ref_shape, dtype=np.float32)
-                                    missing_modalities.append(modality)
-                                else:
-                                    print(f"⚠️  跳过: {case_id} 的 {modality} 模态重采样失败")
-                                    continue
+                        # 总是尝试重采样
+                        resampled_data = self._resample_image(data, ref_shape, case_id, modality)
+                        if resampled_data is not None:
+                            data = resampled_data
                         else:
+                            # 重采样失败，根据模式处理
                             if self.zero_fill_missing:
-                                print(f"   🔄 形状不一致，使用0填充: {case_id} 的 {modality}")
+                                print(f"   🔄 重采样失败，使用0填充: {case_id} 的 {modality}")
                                 data = np.zeros(ref_shape, dtype=np.float32)
                                 missing_modalities.append(modality)
                             else:
-                                print(f"⚠️  跳过: {case_id} 的 {modality} 模态形状不一致: {data.shape} vs {ref_shape}")
+                                print(f"⚠️  跳过: {case_id} 的 {modality} 模态重采样失败")
                                 continue
                     
                     combined_data[..., i] = data
@@ -404,7 +561,13 @@ class BPHPCAToNnUNetConverter:
                 # 如果不是0填充模式，直接跳过缺失的模态
         
         if valid_channels == 0:
-            raise ValueError(f"没有有效的模态数据")
+            # 如果所有模态都失败，但我们在0填充模式下，创建全0数据
+            if self.zero_fill_missing:
+                print(f"   ⚠️  所有模态都失败，创建全0病例: {case_id}")
+                combined_data = np.zeros((*ref_shape, num_channels), dtype=np.float32)
+                valid_channels = num_channels
+            else:
+                raise ValueError(f"没有有效的模态数据")
         
         # 0填充模式下不需要裁剪，因为所有通道都已填充
         if not self.zero_fill_missing and valid_channels < num_channels:
@@ -533,14 +696,28 @@ class BPHPCAToNnUNetConverter:
                     image_filename = self._combine_modalities(modalities, case_id)
                     label_filename = self._process_label(case_id, category)
                     
+                    # 只有当图像和标签文件都成功创建时才添加到列表
                     if image_filename and label_filename:
-                        processed_cases.append({
-                            'case_id': case_id,
-                            'category': category,
-                            'modalities': list(modalities.keys()),
-                            'image_file': image_filename,
-                            'label_file': label_filename
-                        })
+                        # 验证文件确实存在
+                        image_path = self.images_tr_dir / image_filename
+                        label_path = self.labels_tr_dir / label_filename
+                        
+                        if image_path.exists() and label_path.exists():
+                            processed_cases.append({
+                                'case_id': case_id,
+                                'category': category,
+                                'modalities': list(modalities.keys()),
+                                'image_file': image_filename,
+                                'label_file': label_filename
+                            })
+                        else:
+                            print(f"⚠️  文件创建失败: {case_id}")
+                            if not image_path.exists():
+                                print(f"     缺失图像文件: {image_filename}")
+                            if not label_path.exists():
+                                print(f"     缺失标签文件: {label_filename}")
+                    else:
+                        print(f"⚠️  处理失败: {case_id} (image: {bool(image_filename)}, label: {bool(label_filename)})")
                 
                 except Exception as e:
                     print(f"❌ 处理 {case_id} 时出错: {e}")
