@@ -1,2 +1,29 @@
+# 数据目录
 data/
-nnUNet_raw_data_base/
+nnUNet_raw/
+nnUNet_preprocessed/
+nnUNet_results/
+
+# Python缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 临时文件
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+
+# IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 测试输出
+test_*/
+demo_*/
+temp_*/
