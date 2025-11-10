@@ -412,8 +412,12 @@ class BPHPCAToNnUNetConverter:
         
         return True, modalities
     
-    def _combine_modalities(self, modalities: Dict[str, Path], case_id: str) -> str:
-        """合并多模态数据为nnU-Net格式"""
+    def _combine_modalities(self, modalities: Dict[str, Path], case_id: str) -> tuple:
+        """合并多模态数据为nnU-Net格式
+        
+        Returns:
+            tuple: (output_filename, ref_affine, ref_shape)
+        """
         # 确定要处理的模态列表
         if self.zero_fill_missing:
             # 0填充模式：处理所有定义的模态
@@ -589,10 +593,17 @@ class BPHPCAToNnUNetConverter:
         combined_img = nib.Nifti1Image(combined_data, ref_affine, header)
         nib.save(combined_img, output_path)
         
-        return output_filename
+        return output_filename, ref_affine, ref_shape
     
-    def _process_label(self, case_id: str, category: str) -> str:
-        """处理标签文件"""
+    def _process_label(self, case_id: str, category: str, ref_affine: np.ndarray, ref_shape: tuple) -> str:
+        """处理标签文件
+        
+        Args:
+            case_id: 病例ID
+            category: 类别（BPH或PCA）
+            ref_affine: 参考仿射矩阵（来自图像）
+            ref_shape: 参考形状（来自图像）
+        """
         roi_dir = self.source_dir / "ROI(BPH+PCA)" / category
         label_file = roi_dir / f"{case_id}.nii"
         
@@ -604,9 +615,17 @@ class BPHPCAToNnUNetConverter:
         label_img = nib.load(label_file)
         label_data = label_img.get_fdata().astype(np.uint8)
         
+        # 如果标签形状与参考形状不一致，进行重采样
+        if label_data.shape != ref_shape:
+            print(f"   🔄 重采样标签 {case_id}: {label_data.shape} -> {ref_shape}")
+            label_data = self._resample_image(label_data, ref_shape, case_id, "label")
+            if label_data is None:
+                print(f"   ❌ 标签重采样失败: {case_id}")
+                return None
+        
         # 将标签值映射为类别
         label_value = self.label_mapping[category]
-        label_data = np.where(label_data > 0, label_value, 0)
+        label_data = np.where(label_data > 0, label_value, 0).astype(np.uint8)
         
         # 保存标签
         # nnU-Net v2要求标签文件不带通道后缀
@@ -617,7 +636,8 @@ class BPHPCAToNnUNetConverter:
         header = nib.Nifti1Header()
         header.set_data_dtype(np.uint8)
         
-        label_img_new = nib.Nifti1Image(label_data, label_img.affine, header)
+        # 使用与图像相同的affine矩阵，确保空间一致性
+        label_img_new = nib.Nifti1Image(label_data, ref_affine, header)
         nib.save(label_img_new, output_path)
         
         return output_filename
@@ -695,8 +715,8 @@ class BPHPCAToNnUNetConverter:
                 
                 # 合并多模态数据
                 try:
-                    image_filename = self._combine_modalities(modalities, case_id)
-                    label_filename = self._process_label(case_id, category)
+                    image_filename, ref_affine, ref_shape = self._combine_modalities(modalities, case_id)
+                    label_filename = self._process_label(case_id, category, ref_affine, ref_shape)
                     
                     # 只有当图像和标签文件都成功创建时才添加到列表
                     if image_filename and label_filename:
