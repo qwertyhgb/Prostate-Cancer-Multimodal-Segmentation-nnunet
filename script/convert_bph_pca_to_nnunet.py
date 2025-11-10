@@ -578,7 +578,8 @@ class BPHPCAToNnUNetConverter:
             print(f"   📊 {case_id} 0填充模态: {missing_modalities}")
         
         # 保存合并后的图像
-        output_filename = f"{case_id}_{self.dataset_id:03d}.nii.gz"
+        # nnU-Net v2要求多通道图像使用_0000后缀
+        output_filename = f"{case_id}_0000.nii.gz"
         output_path = self.images_tr_dir / output_filename
         
         # 创建合适的header
@@ -608,7 +609,8 @@ class BPHPCAToNnUNetConverter:
         label_data = np.where(label_data > 0, label_value, 0)
         
         # 保存标签
-        output_filename = f"{case_id}_{self.dataset_id:03d}.nii.gz"
+        # nnU-Net v2要求标签文件不带通道后缀
+        output_filename = f"{case_id}.nii.gz"
         output_path = self.labels_tr_dir / output_filename
         
         # 创建合适的header
