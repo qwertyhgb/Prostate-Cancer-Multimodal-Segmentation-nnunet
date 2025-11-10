@@ -582,18 +582,25 @@ class BPHPCAToNnUNetConverter:
             print(f"   📊 {case_id} 0填充模态: {missing_modalities}")
         
         # 保存合并后的图像
-        # nnU-Net v2要求多通道图像使用_0000后缀
-        output_filename = f"{case_id}_0000.nii.gz"
-        output_path = self.images_tr_dir / output_filename
+        # nnU-Net v2要求每个通道保存为单独的3D文件
+        # 文件命名: case_id_0000.nii.gz, case_id_0001.nii.gz, ...
         
-        # 创建合适的header
-        header = nib.Nifti1Header()
-        header.set_data_dtype(np.float32)
+        output_filenames = []
+        for channel_idx in range(combined_data.shape[-1]):
+            channel_data = combined_data[..., channel_idx]
+            output_filename = f"{case_id}_{channel_idx:04d}.nii.gz"
+            output_path = self.images_tr_dir / output_filename
+            
+            # 创建合适的header
+            header = nib.Nifti1Header()
+            header.set_data_dtype(np.float32)
+            
+            channel_img = nib.Nifti1Image(channel_data, ref_affine, header)
+            nib.save(channel_img, output_path)
+            output_filenames.append(output_filename)
         
-        combined_img = nib.Nifti1Image(combined_data, ref_affine, header)
-        nib.save(combined_img, output_path)
-        
-        return output_filename, ref_affine, ref_shape
+        # 返回第一个文件名（用于记录）
+        return output_filenames[0], ref_affine, ref_shape
     
     def _process_label(self, case_id: str, category: str, ref_affine: np.ndarray, ref_shape: tuple) -> str:
         """处理标签文件
